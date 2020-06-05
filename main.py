@@ -2,34 +2,51 @@ import os
 import requests
 import telegram
 import logging
+import textwrap
+import time
 from dotenv import load_dotenv
 
 logger = logging.getLogger('devman')
 
 
-def send_message_telegram(message_text):
-    if message_text:
-        chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-        bot = telegram.Bot(token=os.environ.get('TELEGRAM_ACCESS_TOKEN'))
-        bot.sendMessage(chat_id=chat_id, text=message_text)
+def send_message_telegram(message=''):
+    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+    bot = telegram.Bot(token=os.environ.get('TELEGRAM_ACCESS_TOKEN'))
+    bot.sendMessage(chat_id=chat_id, text=message)
 
 
-def get_message_text(lesson_info):
-    message_text = ''
-    if not lesson_info:
-        return message_text
-
-    lesson_title = lesson_info[0]['lesson_title']
-    lesson_url = lesson_info[0]['lesson_url']
-    if lesson_info[0]['is_negative']:
-        message_text = f'У вас проверили работу "{lesson_title}"\n\
-К сожалению в работе нашлись ошибки.\nhttps://dvmn.org{lesson_url}'
+def get_message(attempt):
+    lesson_title = attempt['lesson_title']
+    lesson_url = attempt['lesson_url']
+    if attempt['is_negative']:
+        message_text = f'''\
+            У вас проверили работу "{lesson_title}"
+            К сожалению в работе нашлись ошибки.
+            https://dvmn.org{lesson_url}'''
     else:
-        message_text = f'У вас проверили работу "{lesson_title}"\n\
-Преподавателю все понравилось, можно приступать к следующему уроку.\n\
-https://dvmn.org{lesson_url}'
+        message_text = f'''\
+            У вас проверили работу "{lesson_title}"
+            Преподавателю все понравилось, можно приступать к следующему уроку.
+            https://dvmn.org{lesson_url}'''
 
-    return message_text
+    return textwrap.dedent(message_text)
+
+
+def prepare_message(response_from_site):
+    if 'new_attempts' in response_from_site:
+        new_attempts = response_from_site['new_attempts']
+        if not new_attempts:
+            raise ValueError('Отсутствует информация об уроке')
+        return get_message(new_attempts[0])
+
+
+def get_timestamp(response_from_site):
+    if 'new_attempts' in response_from_site:
+        new_attempts = response_from_site['new_attempts']
+        attempt = new_attempts[0]
+        return {'timestamp': attempt['timestamp']}
+    else:
+        return {'timestamp': response_from_site['timestamp_to_request']}
 
 
 def send_request(headers, params):
@@ -39,29 +56,29 @@ def send_request(headers, params):
     return response.json()
 
 
-def catch_event_checking(responce_from_site):
-    if 'new_attempts' in responce_from_site:
-        review_title = get_message_text(responce_from_site['new_attempts'])
-        send_message_telegram(review_title)
-    else:
-        return {
-            'timestamp': responce_from_site['timestamp_to_request']
-        }
-
-
 def launch_poll(header):
     params = None
+    connection_errors = 0
     while True:
         try:
-            responce_from_site = send_request(header, params)
+            response_from_site = send_request(header, params)
+            text_of_message = prepare_message(response_from_site)
+            if text_of_message:
+                send_message_telegram(text_of_message)
+            params = get_timestamp(response_from_site)
         except requests.exceptions.ReadTimeout:
-            logger.error('Ошибка ожидания ответа с сайта dvmn.org')
+            continue
         except requests.exceptions.ConnectionError as error:
-            logger.error('Ошибка соединения с сайтом dvmn.org: {0}'.format(error))
+            connection_errors += 1
+            logger.error(f'Ошибка соединения с сайтом dvmn.org: {error}')
         except (KeyError, TypeError) as error:
-            logger.error('Ошибка ответа с сайта dvmn.org: {0}'.format(error))
+            logger.error(f'Ошибка ответа с сайта dvmn.org: {error}')
+        except ValueError as error:
+            logger.error(f'{error}')
         else:
-            params = catch_event_checking(responce_from_site)
+            connection_errors = 0
+        finally:
+            time.sleep(0 if connection_errors < 3 else 0)
 
 
 def initialize_logger():
@@ -77,10 +94,10 @@ def initialize_logger():
 def main():
     load_dotenv()
     initialize_logger()
-    header = {
+    headers = {
         'Authorization': 'Token %s' % os.environ.get('DEVMAN_ACCESS_TOKEN')
     }
-    launch_poll(header)
+    launch_poll(headers)
 
 
 if __name__ == "__main__":
