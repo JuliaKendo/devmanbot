@@ -9,10 +9,10 @@ from dotenv import load_dotenv
 logger = logging.getLogger('devman')
 
 
-def send_message_telegram(message=''):
+def send_telegram_message(message_text=''):
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     bot = telegram.Bot(token=os.environ.get('TELEGRAM_ACCESS_TOKEN'))
-    bot.sendMessage(chat_id=chat_id, text=message)
+    bot.sendMessage(chat_id=chat_id, text=message_text)
 
 
 def get_message(attempt):
@@ -41,10 +41,8 @@ def prepare_message(response_from_site):
 
 
 def get_timestamp(response_from_site):
-    if 'new_attempts' in response_from_site:
-        new_attempts = response_from_site['new_attempts']
-        attempt = new_attempts[0]
-        return {'timestamp': attempt['timestamp']}
+    if 'last_attempt_timestamp' in response_from_site:
+        return {'timestamp': response_from_site['last_attempt_timestamp']}
     else:
         return {'timestamp': response_from_site['timestamp_to_request']}
 
@@ -64,7 +62,7 @@ def launch_poll(header):
             response_from_site = send_request(header, params)
             text_of_message = prepare_message(response_from_site)
             if text_of_message:
-                send_message_telegram(text_of_message)
+                send_telegram_message(text_of_message)
             params = get_timestamp(response_from_site)
         except requests.exceptions.ReadTimeout:
             continue
@@ -78,7 +76,7 @@ def launch_poll(header):
         else:
             connection_errors = 0
         finally:
-            time.sleep(0 if connection_errors < 3 else 0)
+            time.sleep(0 if connection_errors < 3 else 600)
 
 
 def initialize_logger():
