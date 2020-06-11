@@ -9,6 +9,16 @@ from dotenv import load_dotenv
 logger = logging.getLogger('devman')
 
 
+class NotificationLogHandler(logging.Handler):
+
+    def emit(self, record):
+        log_entry = self.format(record)
+        if log_entry:
+            chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+            bot = telegram.Bot(token=os.environ.get('LOG_ACCESS_TOKEN'))
+            bot.sendMessage(chat_id=chat_id, text=log_entry)
+
+
 def send_telegram_message(message_text=''):
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     bot = telegram.Bot(token=os.environ.get('TELEGRAM_ACCESS_TOKEN'))
@@ -57,6 +67,7 @@ def send_request(headers, params):
 def launch_poll(header):
     params = None
     connection_errors = 0
+    logger.info('Бот уведомлений с сайта dvmn.org запущен')
     while True:
         try:
             response_from_site = send_request(header, params)
@@ -68,11 +79,11 @@ def launch_poll(header):
             continue
         except requests.exceptions.ConnectionError as error:
             connection_errors += 1
-            logger.error(f'Ошибка соединения с сайтом dvmn.org: {error}')
-        except (KeyError, TypeError) as error:
-            logger.error(f'Ошибка ответа с сайта dvmn.org: {error}')
-        except ValueError as error:
-            logger.error(f'{error}')
+            logger.info('Бот упал с ошибкой:')
+            logger.error(f'{error}', exc_info=True)
+        except Exception as error:
+            logger.info('Бот упал с ошибкой:')
+            logger.error(f'{error}', exc_info=True)
         else:
             connection_errors = 0
         finally:
@@ -80,13 +91,11 @@ def launch_poll(header):
 
 
 def initialize_logger():
-    output_dir = os.path.dirname(os.path.realpath(__file__))
-    logger.setLevel(logging.DEBUG)
-    handler = logging.FileHandler(os.path.join(output_dir, 'log.txt'), "a")
-    handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+    handler = NotificationLogHandler()
+    formatter = logging.Formatter('%(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
 
 
 def main():
